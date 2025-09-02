@@ -2,45 +2,25 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>CLO Article → Structured Data</title>
+  <title>CLO Structured Extractor</title>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <style>
     body { font-family: Arial, sans-serif; background:#f7f8fa; padding:20px; }
     h1 { color:#222; }
-    .container { display:flex; gap:20px; }
-    .box { background:white; padding:15px; border-radius:10px; box-shadow:0 2px 5px rgba(0,0,0,0.1); flex:1; }
+    .box { background:white; padding:15px; border-radius:10px; box-shadow:0 2px 5px rgba(0,0,0,0.1); }
     pre { background:#f0f0f0; padding:10px; border-radius:5px; white-space:pre-wrap; }
-    table { border-collapse:collapse; width:100%; margin-top:10px; }
-    th, td { border:1px solid #ccc; padding:6px; text-align:center; font-size:14px; }
-    th { background:#eee; }
-    button { padding:10px 20px; border:none; border-radius:6px; cursor:pointer; font-size:14px; }
-    .btn { background:#2e7d32; color:white; margin-top:10px; }
+    button { padding:10px 20px; border:none; border-radius:6px; cursor:pointer; font-size:14px; background:#2e7d32; color:white; }
   </style>
 </head>
 <body>
 
-<h1>📑 CLO Article → Structured Data</h1>
-<p>Upload an article screenshot. Output shows structured deal info + tranche table.</p>
-
+<h1>📑 CLO Article → Structured Fields</h1>
 <input type="file" id="fileInput" accept="image/*"><br><br>
-<button class="btn" onclick="runOCR()">Run OCR & Extract</button>
+<button onclick="runOCR()">Run OCR & Extract</button>
 
-<div class="container" style="margin-top:20px;">
-  <div class="box">
-    <h3>Structured Deal Info</h3>
-    <pre id="dealInfo">Waiting...</pre>
-  </div>
-  <div class="box">
-    <h3>Tranche Table</h3>
-    <table id="trancheTable">
-      <thead>
-        <tr>
-          <th>Class</th><th>Size ($M)</th><th>Expected Rating</th><th>Coupon</th><th>Price</th><th>Discount Margin</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-  </div>
+<div class="box" style="margin-top:20px;">
+  <h3>Structured CLO Data</h3>
+  <pre id="dealInfo">Waiting...</pre>
 </div>
 
 <script>
@@ -50,58 +30,41 @@ async function runOCR() {
 
   const { data: { text } } = await Tesseract.recognize(file, 'eng');
   const cleanText = text.replace(/\s+/g, ' ').trim();
-  const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean);
 
-  // --- Date normalizer ---
-  function normalizeDate(raw) {
+  function normalizeDate(raw, short=false) {
     if (!raw) return null;
     try {
       const d = new Date(raw.replace(/\./g,""));
       if (!isNaN(d)) {
-        return d.toISOString().split("T")[0]; // YYYY-MM-DD
+        if (short) {
+          // mm/dd/yy
+          let mm = String(d.getMonth()+1).padStart(2,'0');
+          let dd = String(d.getDate()).padStart(2,'0');
+          let yy = String(d.getFullYear()).slice(-2);
+          return `${mm}/${dd}/${yy}`;
+        }
+        return d.toISOString().split("T")[0];
       }
     } catch {}
-    return raw; // fallback
+    return raw;
   }
 
-  // --- Deal Info Extraction ---
+  // --- Extract with regex ---
+  const cloClose = (cleanText.match(/(expected to close|settle).*?([A-Za-z]+\.? \d{1,2}, \d{4})/i) || [null,null,null])[2];
+  const pricedDate = (cleanText.match(/priced (on )?([A-Za-z]+\.? \d{1,2}, \d{4})/i) || [null,null,null])[2];
+  const maturity = (cleanText.match(/final maturity.*?([A-Za-z]+\.? \d{1,2}, \d{4}|[A-Za-z]+ \d{4})/i) || [null,null,null])[2];
+  const reinv = (cleanText.match(/reinvestment.* (January|February|March|April|May|June|July|August|September|October|November|December) ?\d{0,2},? \d{4}/i) || [null,null])[0];
+  const noncall = (cleanText.match(/non-?call.* ([A-Za-z]+\.? \d{1,2}, \d{4})/i) || [null,null,null])[2];
+
   const deal = {
-    issuer: (cleanText.match(/(CLO \d+|Elmwood CLO \d+.*?LLC)/i) || [null])[0],
-    deal_size_millions: parseFloat((cleanText.match(/\$([0-9,.]+)\s*m/i) || [0,0])[1].replace(/,/g,'')) || null,
-    close_date: normalizeDate((cleanText.match(/close on ([A-Za-z]+\.? \d{1,2}, \d{4})/i) || [null,null])[1]),
-    non_call_end_date: normalizeDate((cleanText.match(/non-?call .* ([A-Za-z]+\.? \d{1,2}, \d{4})/i) || [null,null])[1]),
-    reinvestment_end_date: normalizeDate((cleanText.match(/reinvestment .* (October \d{4})/i) || [null,null])[1]),
-    final_maturity: normalizeDate((cleanText.match(/final maturity .* (October \d{4})/i) || [null,null])[1])
+    "CLO Close Date": normalizeDate(cloClose),
+    "Priced Date": normalizeDate(pricedDate),
+    "Maturity Date": normalizeDate(maturity,true),   // mm/dd/yy format
+    "Reinv Period End Date": normalizeDate(reinv),
+    "Non-call Period End Date": normalizeDate(noncall)
   };
+
   document.getElementById("dealInfo").textContent = JSON.stringify(deal, null, 2);
-
-  // --- Tranche Table Extraction ---
-  const classes = ["A-1","A-2","B","C","D","E","F","Sub"];
-  const trancheRows = [];
-
-  lines.forEach(line => {
-    const parts = line.split(/\s+/);
-    if (classes.some(c => line.startsWith(c))) {
-      let cls = parts[0];
-      if (cls === "Sub") cls = "Sub Notes";
-      const size = parseFloat(parts[1]) || "";
-      const rating = parts[2] || "";
-      const coupon = parts.find(x => x.includes("S+")) || "";
-      const price = parts.find(x => /^\d{2,3}$/.test(x)) || "";
-      const dm = parts[parts.length-1] || "";
-      trancheRows.push({class:cls, size_m:size, rating, coupon, price, dm});
-    }
-  });
-
-  // Render table
-  const tbody = document.querySelector("#trancheTable tbody");
-  tbody.innerHTML = "";
-  trancheRows.forEach(row => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${row.class}</td><td>${row.size_m}</td><td>${row.rating}</td>
-                    <td>${row.coupon}</td><td>${row.price}</td><td>${row.dm}</td>`;
-    tbody.appendChild(tr);
-  });
 }
 </script>
 
