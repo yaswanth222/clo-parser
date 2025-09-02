@@ -49,37 +49,49 @@ async function runOCR() {
   if (!file) { alert("Please upload an image."); return; }
 
   const { data: { text } } = await Tesseract.recognize(file, 'eng');
-
-  // Clean OCR text
   const cleanText = text.replace(/\s+/g, ' ').trim();
+  const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean);
+
+  // --- Date normalizer ---
+  function normalizeDate(raw) {
+    if (!raw) return null;
+    try {
+      const d = new Date(raw.replace(/\./g,""));
+      if (!isNaN(d)) {
+        return d.toISOString().split("T")[0]; // YYYY-MM-DD
+      }
+    } catch {}
+    return raw; // fallback
+  }
 
   // --- Deal Info Extraction ---
   const deal = {
-    issuer: (cleanText.match(/(CLO \d+|Elmwood CLO 45 Ltd.*?LLC)/i) || [null])[0],
-    deal_size_millions: parseFloat((cleanText.match(/\$([0-9,.]+)M/) || [0,0])[1].replace(/,/g,'')) || null,
-    close_date: (cleanText.match(/close on ([A-Za-z]+\.? \d{1,2}, \d{4})/i) || [null,null])[1],
-    non_call_end_date: (cleanText.match(/non-?call period ending ([A-Za-z]+\.? \d{1,2}, \d{4})/i) || [null,null])[1],
-    reinvestment_end_date: (cleanText.match(/reinvestment period .* (October \d{4})/i) || [null,null])[1],
-    final_maturity: (cleanText.match(/final maturity .* (October \d{4})/i) || [null,null])[1]
+    issuer: (cleanText.match(/(CLO \d+|Elmwood CLO \d+.*?LLC)/i) || [null])[0],
+    deal_size_millions: parseFloat((cleanText.match(/\$([0-9,.]+)\s*m/i) || [0,0])[1].replace(/,/g,'')) || null,
+    close_date: normalizeDate((cleanText.match(/close on ([A-Za-z]+\.? \d{1,2}, \d{4})/i) || [null,null])[1]),
+    non_call_end_date: normalizeDate((cleanText.match(/non-?call .* ([A-Za-z]+\.? \d{1,2}, \d{4})/i) || [null,null])[1]),
+    reinvestment_end_date: normalizeDate((cleanText.match(/reinvestment .* (October \d{4})/i) || [null,null])[1]),
+    final_maturity: normalizeDate((cleanText.match(/final maturity .* (October \d{4})/i) || [null,null])[1])
   };
-
   document.getElementById("dealInfo").textContent = JSON.stringify(deal, null, 2);
 
   // --- Tranche Table Extraction ---
+  const classes = ["A-1","A-2","B","C","D","E","F","Sub"];
   const trancheRows = [];
-  const trancheRegex = /(A-1|A-2|B|C|D|E|F|Sub Notes)\s+([\d.]+)\s+([A-Z-]+|NR)\s+([S+\d]+)?\s+(\d+)\s+(\d+)/gi;
 
-  let m;
-  while ((m = trancheRegex.exec(cleanText)) !== null) {
-    trancheRows.push({
-      class: m[1],
-      size_m: parseFloat(m[2]),
-      rating: m[3],
-      coupon: m[4] || "",
-      price: m[5],
-      dm: m[6]
-    });
-  }
+  lines.forEach(line => {
+    const parts = line.split(/\s+/);
+    if (classes.some(c => line.startsWith(c))) {
+      let cls = parts[0];
+      if (cls === "Sub") cls = "Sub Notes";
+      const size = parseFloat(parts[1]) || "";
+      const rating = parts[2] || "";
+      const coupon = parts.find(x => x.includes("S+")) || "";
+      const price = parts.find(x => /^\d{2,3}$/.test(x)) || "";
+      const dm = parts[parts.length-1] || "";
+      trancheRows.push({class:cls, size_m:size, rating, coupon, price, dm});
+    }
+  });
 
   // Render table
   const tbody = document.querySelector("#trancheTable tbody");
@@ -95,4 +107,3 @@ async function runOCR() {
 
 </body>
 </html>
-
