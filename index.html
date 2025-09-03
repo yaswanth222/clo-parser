@@ -1,127 +1,35 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>CLO Article → Structured Data</title>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
+  <meta charset="UTF-8">
+  <title>Ratings Search Tool</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: #f8f9fa;
-      padding: 20px;
-    }
-    .container {
-      max-width: 800px;
-      margin: auto;
-      background: #fff;
-      padding: 20px;
-      border-radius: 12px;
-      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-    }
-    h2 {
-      text-align: center;
-      margin-bottom: 20px;
-    }
-    input, button {
-      display: block;
-      margin: 10px 0;
-      padding: 10px;
-      width: 100%;
-      border: 1px solid #ccc;
-      border-radius: 8px;
-      font-size: 16px;
-    }
-    button {
-      background: #28a745;
-      color: white;
-      cursor: pointer;
-      border: none;
-      font-weight: bold;
-    }
-    button:hover {
-      background: #218838;
-    }
-    .output {
-      margin-top: 20px;
-      padding: 15px;
-      background: #f1f3f5;
-      border-radius: 8px;
-      white-space: pre-wrap;
-      font-family: monospace;
-    }
+    body { font-family: Arial, sans-serif; text-align: center; margin-top: 80px; }
+    input, button { padding: 10px; font-size: 16px; margin: 5px; width: 250px; }
+    button { background: green; color: white; border: none; border-radius: 6px; cursor: pointer; }
+    button:hover { background: darkgreen; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h2>CLO Article → Structured Data</h2>
-
-    <input type="file" id="fileInput" accept="image/*">
-    <button onclick="runOCR()">Run OCR & Extract</button>
-
-    <div class="output" id="output"></div>
-  </div>
+  <h2>Company Ratings Search</h2>
+  <input type="text" id="company" placeholder="Enter company name" />
+  <br>
+  <button onclick="searchRatings()">Search Ratings</button>
 
   <script>
-    async function runOCR() {
-      const file = document.getElementById("fileInput").files[0];
-      if (!file) {
-        alert("Please upload an image first.");
+    function searchRatings() {
+      const company = document.getElementById("company").value.trim();
+      if (!company) {
+        alert("Please enter a company name");
         return;
       }
+      // Moody’s search
+      const moodysUrl = `https://www.google.com/search?q=site:moodys.com+"${encodeURIComponent(company)}"+rating`;
+      // S&P search
+      const spUrl = `https://www.google.com/search?q=site:standardandpoors.com+"${encodeURIComponent(company)}"+rating`;
 
-      document.getElementById("output").textContent = "Processing OCR...";
-
-      const { data: { text } } = await Tesseract.recognize(file, "eng");
-
-      // Normalize text
-      const cleanText = text.replace(/\s+/g, " ");
-
-      // Regex patterns
-      const datePattern = /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s*\d{1,2},\s*\d{4}\b/gi;
-
-      function extractDate(keyword) {
-        const regex = new RegExp(`${keyword}[^.]*?(${datePattern.source})`, "i");
-        const match = cleanText.match(regex);
-        return match ? formatDate(match[1]) : null;
-      }
-
-      function formatDate(dateStr) {
-        const parsed = dayjs(dateStr);
-        return parsed.isValid() ? parsed.format("MM/DD/YYYY") : null;
-      }
-
-      // Extract fields
-      const closeDate = extractDate("close") || extractDate("settle");
-      const pricedDate = extractDate("price");
-      const maturityDate = extractDate("maturity");
-      const nonCallEnd = extractDate("non-call");
-      const reinvEnd = extractDate("reinvestment");
-
-      // Calculate periods
-      function calcYears(start, end) {
-        if (!start || !end) return null;
-        const s = dayjs(start);
-        const e = dayjs(end);
-        const diff = e.diff(s, "month") / 12;
-        return Math.round(diff * 4) / 4; // nearest 0.25 years
-      }
-
-      const nonCallPeriod = calcYears(closeDate, nonCallEnd);
-      const reinvPeriod = calcYears(closeDate, reinvEnd);
-
-      const result = {
-        "CLO Close Date": closeDate,
-        "Priced Date": pricedDate,
-        "Maturity Date": maturityDate,
-        "Reinvestment Period": reinvPeriod,
-        "Reinv Period End Date": reinvEnd,
-        "Non-call Period": nonCallPeriod,
-        "Non-call Period End Date": nonCallEnd
-      };
-
-      document.getElementById("output").textContent =
-        JSON.stringify(result, null, 2);
+      window.open(moodysUrl, "_blank");
+      window.open(spUrl, "_blank");
     }
   </script>
 </body>
